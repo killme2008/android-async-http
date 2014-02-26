@@ -122,17 +122,16 @@ public class AsyncHttpResponseHandler implements ResponseHandlerInterface {
     // avoid leaks by using a non-anonymous handler class
     // with a weak reference
     static class ResponderHandler extends Handler {
-        private final WeakReference<AsyncHttpResponseHandler> mResponder;
+        private final AsyncHttpResponseHandler mResponder;
 
-        ResponderHandler(AsyncHttpResponseHandler service) {
-            mResponder = new WeakReference<AsyncHttpResponseHandler>(service);
+        ResponderHandler(AsyncHttpResponseHandler mResponder) {
+            this.mResponder = mResponder;
         }
 
         @Override
         public void handleMessage(Message msg) {
-            AsyncHttpResponseHandler service = mResponder.get();
-            if (service != null) {
-                service.handleMessage(msg);
+            if (mResponder != null) {
+        	mResponder.handleMessage(msg);
             }
         }
     }
@@ -164,10 +163,11 @@ public class AsyncHttpResponseHandler implements ResponseHandlerInterface {
      * Creates a new AsyncHttpResponseHandler
      */
     public AsyncHttpResponseHandler() {
-        // Set up a handler to post events back to the correct thread if possible
-        if (Looper.myLooper() != null) {
-            handler = new ResponderHandler(this);
-        }
+        // There is always a handler ready for delivering messages.
+        handler = new ResponderHandler(this);
+
+        // Init Looper by calling postRunnable without an argument.
+        postRunnable(null);
     }
 
 
@@ -182,6 +182,7 @@ public class AsyncHttpResponseHandler implements ResponseHandlerInterface {
      * @param totalSize    total size of file
      */
     public void onProgress(int bytesWritten, int totalSize) {
+	 Log.v(LOG_TAG, String.format("Progress %d from %d (%d%%)", bytesWritten, totalSize, (totalSize > 0) ? (bytesWritten / totalSize) * 100 : -1));
     }
 
     /**
@@ -400,7 +401,7 @@ public class AsyncHttpResponseHandler implements ResponseHandlerInterface {
     }
 
     protected void sendMessage(Message msg) {
-        if (getUseSynchronousMode() || handler == null) {
+        if (getUseSynchronousMode()) {
             handleMessage(msg);
         } else if (!Thread.currentThread().isInterrupted()) { // do not send messages if request has been cancelled
             handler.sendMessage(msg);
@@ -408,23 +409,20 @@ public class AsyncHttpResponseHandler implements ResponseHandlerInterface {
     }
 
     protected void postRunnable(Runnable r) {
-        if (r != null) {
+	boolean missingLooper = null == Looper.myLooper();
+        if (missingLooper) {
+            Looper.prepare();
+        }
+        if (null != r) {
             handler.post(r);
+        }
+        if (missingLooper) {
+            Looper.loop();
         }
     }
 
-    protected Message obtainMessage(int responseMessage, Object response) {
-        Message msg;
-        if (handler != null) {
-            msg = handler.obtainMessage(responseMessage, response);
-        } else {
-            msg = Message.obtain();
-            if (msg != null) {
-                msg.what = responseMessage;
-                msg.obj = response;
-            }
-        }
-        return msg;
+    protected Message obtainMessage(int responseMessageId, Object responseMessageData) {
+	return handler.obtainMessage(responseMessageId, responseMessageData);
     }
 
     @Override
